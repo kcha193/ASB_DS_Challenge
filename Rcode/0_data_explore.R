@@ -365,7 +365,6 @@ market_sale_final_mat <-
 market_sale_final_mat <- 
   apply(market_sale_final_mat, 2, as.numeric)
 
-# split the data into training and test sets
 train <- market_sale_final_mat
 
 # create DMatrix objects for training and test sets

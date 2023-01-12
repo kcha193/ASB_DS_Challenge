@@ -265,31 +265,41 @@ market_sale_final %>%
   summarise(Sales_mean = mean(Sales),
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
+```
 
+```{r}
 market_sale_final %>%
   group_by(Negative_News) %>%
   summarise(Sales_mean = mean(Sales),
             Sales_sum = sum(Sales)) %>% 
   knitr::kable()
+```
 
+```{r}
 market_sale_final %>%
   group_by(Positive_News, Negative_News) %>%
   summarise(Sales_mean = mean(Sales),
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
+```
 
+```{r}
 market_sale_final %>%
   group_by(Competition)  %>%
   summarise(Sales_mean = mean(Sales),
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
+```
 
+```{r}
 market_sale_final %>%
   group_by(COVID_Lockdown) %>%
   summarise(Sales_mean = mean(Sales),
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
+```
 
+```{r}
 market_sale_final %>%
   group_by(Phone_24) %>%
   summarise(Sales_mean = mean(Sales),
@@ -299,6 +309,8 @@ market_sale_final %>%
 
 
 ## Modelling using linear regression
+
+Since the distribution of the total units sold is relatively normal with a belt-shaped curve, I will start by fitting a multiple linear regression model for the total units sold, as seen below. Using a multiple linear regression model is a good starting point, because it is relatively straightforward to fit the model and perform model diagnostics to decide whether a more complicated modelling technique is required. Further, linear regression analysis makes inference easy, i.e. interpreting which predictor variable has statistically significant effects or has the most influence on the target variable. Lastly,  linear regression analysis can be used to make predictions about the value of the target variable based on the values of the predictor variables.
 
 ### Fitting the model
 
@@ -312,24 +324,36 @@ linear_reg_fit <-
   )
 ```
 
+ANOVA table of the initial model
+
 ```{r}
-anova(linear_reg_fit) %>% knitr::kable() 
+anova(linear_reg_fit)
 ```
+
+Choose a model by AIC in a Stepwise Algorithm
 
 ```{r}
 
 linear_reg_fit_final <- step(linear_reg_fit) 
-# Choose a model by AIC in a Stepwise Algorithm
+
 ```
+
+ANOVA table of the final model
 
 ```{r}
-
-anova(linear_reg_fit_final) %>% knitr::kable() 
+anova(linear_reg_fit_final) 
 ```
+
+Parameter estimates
 
 ```{r}
 summary(linear_reg_fit_final)  
+
+sum_stats <- summary(linear_reg_fit_final)
 ```
+
+Note that this multiple linear regression model has an adjusted R-square of `r sum_stats$adj.r.squared`, which means this model can explain **`r scales::percent(sum_stats$adj.r.squared, accuracy = 0.01)`** of the information, thus a very accurate model. 
+
 
 ### Model diagnostics
 
@@ -346,10 +370,11 @@ mse_linear <-
            type = "response") ) ^2
 ```
 
+The AIC and mean square error from the Poisson regression model are `r AIC(linear_reg_fit_final)` and `r mse_linear`, respectively. This histogram of the residual is relatively normal, and the residual plot is randomly scattered around the residual of zero. 
+
 ## Modelling using Poisson regression
 
-Poisson regression is often used for modeling count data.
-
+Poisson regression is often used for modeling count data. Thus, below is the modelling results using the Poisson regression analysis. 
 
 ### Fitting the model
 
@@ -364,16 +389,24 @@ poisson_reg_fit <-
 )
 ```
 
+ANOVA table of the initial model
+
 ```{r}
-car::Anova(poisson_reg_fit) %>% knitr::kable() 
+car::Anova(poisson_reg_fit) 
 ```
+
+
+Choose a model by AIC in a Stepwise Algorithm
 
 ```{r}
 poisson_reg_fit_final <- step(poisson_reg_fit)
 ```
 
+
+ANOVA table of the final model
+
 ```{r}
-car::Anova(poisson_reg_fit_final) %>% knitr::kable() 
+car::Anova(poisson_reg_fit_final)
 ```
 
 ### Model diagnostics
@@ -391,11 +424,74 @@ mse_poisson <-
            type = "response") ) ^2
 ```
 
-The AIC (`r AIC(poisson_reg_fit_final)`) and mean square error (`r mse_poisson`) from the Poisson regression model are slightly worse than the estimates from the linear regression above. 
+The AIC (`r AIC(poisson_reg_fit_final)`) and mean square error (`r mse_poisson`) from the Poisson regression model are slightly worse than the estimates from the linear regression above (IC (`r AIC(linear_reg_fit_final)`) and mean square error (`r mse_linear`)). 
 
+
+## Modelling using eXtreme Gradient Boosting (XGBoost)
+
+Finally, I will also use the XGBoost model to see if we can obtain a model with an even smaller mean square error to ensure the total sales prediction is accurate and robust. When prepping the data for the model training below, I did not split the data into training and testing. This is because the two models above both compute the mean square error with the training data set only. Thus, I would not split the testing dataset to consistently compare the mean square errors between different models.  
+
+```{r, message=FALSE}
+market_sale_final_mat <- 
+  market_sale_final %>% 
+    select(Sales, Ad_Spend, Phone_24, Positive_News, Negative_News, Competition,
+           Ultra_Edition, COVID_Lockdown, Year_num, Month_num, Day_num) %>% 
+    mutate(Year_month = paste0(Year_num, Month_num)) %>%
+    as.matrix() 
+
+market_sale_final_mat <- 
+  apply(market_sale_final_mat, 2, as.numeric)
+
+train <- market_sale_final_mat
+
+# create DMatrix objects for training and test sets
+dtrain <- xgb.DMatrix(data = train[,-1],  label = train[, "Sales"])
+
+# specify the model parameters
+params <- list(booster = "gbtree", objective = "reg:squarederror", 
+               eta = 0.3, max_depth = 3,subsample = 0.8,
+               colsample_bytree = 0.8, nthread = 2)
+
+#tuning hyperparameter
+gridsearch_params <- list(max_depth = c(2,4,6),min_child_weight = c(1,3,5))
+cv_result <- 
+  xgb.cv(params = params, data = dtrain, nfold = 5, nrounds = 100,
+       num_boost_round = 100, early_stopping_rounds = 10, 
+       metrics = "mse", verbose = TRUE, 
+       seed = 1, 
+       maximize = FALSE, 
+       param_comb = gridsearch_params)
+
+# update the model parameters with the optimal values
+params$max_depth <- cv_result$best_param["max_depth"]
+params$min_child_weight <- cv_result$best_param["min_child_weight"]
+
+# train the final model using the optimal parameters and number of rounds
+xgboostModel <- xgb.train(params, dtrain, nrounds = 10)
+```
+
+
+Feature Importance of the model
+
+```{r}
+xgb.importance(colnames(train[,-1]), model = xgboostModel)
+```
+
+
+```{r}
+predictions <- predict(xgboostModel, dtrain)
+
+# calculate the mean squared error of the predictions
+mse_xgboost <- mean((train[, "Sales"] - predictions)^2)
+```
+
+The mean square error of this machine learning model using XGboost is `r `mse_xgboost`, which much higher than the linear regession model of `r mse_linear`. Therefore, I will use the multiple linear regression above for the making the final prediction. 
 
 
 ## Final results
+
+As noted above, the multiple linear regression model has shown to perform the best compared to the Poisson regression model and 
+
 
 ```{r}
 linear_reg_predict <- 
@@ -445,16 +541,7 @@ plotly::ggplotly(g)  %>% plotly::hide_legend()
 ```
 
 
-
-
 ## Notes
-
-
-
-In conclusion, multiple linear regression appears to perform the best here 
-
-The model explains 94.51% of the variation in the total unit sold and hsould therefore be an accurate model for prediction. 
-
 
 An **alternative method is using a time-series-based analysis** with the `forecast` R package, which can better handle autocorrelation, seasonality, and other temporal patterns in the data. However, applying the method within the `forecast` R package requires the dataset to be converted to a Time-Series (`ts`) object. This process can be complicated, especially if we need to include other predictors such as "Total Advertising Spend" in the model for inference and prediction.
 
