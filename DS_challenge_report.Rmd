@@ -1,29 +1,463 @@
 ---
 title: "Data Science Skills Challenge"
 author: "Kevin Chang"
-output: html_document
+date: 13/01/2022
+output:
+  html_document:
+    theme: united
+    highlight: tango
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Introduction 
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The document contains a detailed analysis of forecast sale expectations of High-End Vacuums for Vac-Attack company in December 2020 using historical data. This analysis aims to determine if the company will meet the target and ensure the stock is on hand to match the demand. 
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+The report describes data cleaning, summary statistics, visualisation and analysis using the statistical model fitting, implemented with R programming language.
 
-```{r cars}
-summary(cars)
+
+## Loading and installing the required R package 
+
+```{r load_pkg, message=FALSE}
+if (!require(tidyverse))
+  install.packages("tidyverse")
+
+if (!require(lubridate))
+  install.packages("lubridate")
+
+if (!require(plotly))
+  install.packages("plotly")
+
+if (!require(car))
+  install.packages("stargazer")
+
+if (!require(xgboost))
+  install.packages("xgboost")
+
+library(tidyverse)
+library(lubridate)
+library(stargazer)
+library(car)
+library(xgboost)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+## Importing Data 
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+First import the Market data. 
+
+```{r read_in_market_data, message=FALSE}
+market_sale_col <- readr::read_csv("Data/MarketingCols.csv", col_names = FALSE)
+
+market_sale_raw <- readr::read_csv("Data/MarketingSales.csv", 
+                                   col_names = market_sale_col$X1)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Then import the December data for prediction. 
+
+```{r read_in_dec_data, message=FALSE}
+dec_col <- readr::read_csv("Data/DecemberCols.csv", col_names = FALSE)
+
+dec_ad_raw <- readr::read_csv("Data/DecemberAdData.csv", 
+                                   col_names = dec_col$X1)
+```
+
+Quick explore of the read-in the data sets
+
+
+```{r quick_explore}
+dim(market_sale_raw)
+
+glimpse(market_sale_raw)
+
+dim(dec_ad_raw)
+
+glimpse(dec_ad_raw)
+```
+
+## Tidy up the variables of both datasets
+
+The next step is to tidy up the data sets for visualisation and modelling. I have also included year, month and day variables in both `factor` and `numeric` formats. 
+
+
+
+```{r tidy_market_sale}
+market_sale_final <- 
+  market_sale_raw %>% 
+  mutate(Date = dmy(Date),
+         Ad_Spend =  AdvertisingSpend,
+         Phone_24 = factor(`0508Line_247`),
+         Positive_News = factor(PositiveNews),
+         Negative_News = factor(NegativeCoverage),
+         Competition = factor(Competition),
+         Ultra_Edition = factor( UltraEdition_Available), 
+         COVID_Lockdown = factor(COVID_Lockdown),
+         Year = factor(year(Date)),
+         Month = factor(Month, levels = month.name),
+         Day = factor(Day, levels =
+                        c("Monday", "Tuesday", "Wednesday", "Thursday",
+                          "Friday", "Saturday", "Sunday")),
+         Month_num = as.numeric(Month),
+         Year_num = year(Date),
+         Day_num = as.numeric(Day),
+         Date_num = date(Date)) %>% 
+  select(Sales, Ad_Spend, Date, Phone_24, Positive_News, Negative_News, 
+         Competition, Ultra_Edition, COVID_Lockdown,
+         Year, Month, Day, Day_num, Date_num, Month_num, Year_num)
+
+dim(market_sale_final)
+
+glimpse(market_sale_final)
+```
+
+
+```{r tidy_dec_ad}
+dec_ad_final <-
+  dec_ad_raw %>%
+  mutate(
+    Date = dmy(Date),
+    Ad_Spend =  AdvertisingSpend,
+    Phone_24 = factor(0, levels = c(0, 1)),
+    Positive_News = factor(0, levels = c(0, 1)),
+    Negative_News = factor(0, levels = c(0, 1)),
+    Competition  = factor(0, levels = c(0, 1)),
+    Ultra_Edition = factor(1, levels = c(0, 1)),
+    COVID_Lockdown = factor(0, levels = c(0, 1)),
+    Year = factor(2020, levels = market_sale_final$Year |> levels() ),
+    Month = factor(Month, levels = month.name),
+    Day = factor(Day, levels =
+                   c("Monday", "Tuesday", "Wednesday", "Thursday",
+                        "Friday", "Saturday", "Sunday")),
+    Year_num = 2020,
+    Month_num = 12,
+    Day_num = as.numeric(Day),
+    Date_num = date(Date)
+  ) %>% 
+  select(Ad_Spend, Date, Phone_24, Positive_News, Negative_News, 
+         Competition, Ultra_Edition, 
+         COVID_Lockdown, Year, Month, Day, Day_num, Date_num, Month_num, Year_num)
+
+dim(dec_ad_final)
+
+glimpse(dec_ad_final)
+```
+
+## Data exploration
+
+### Data visulisation
+
+I will first generate some plots to look for any relationship. 
+
+The first plot is total unit sold  versus time. 
+
+```{r}
+ggplot(market_sale_final, aes(x = Date, y = Sales)) +
+  geom_path() +
+  scale_x_date(date_breaks = "6 month", expand = c(0.01, 0.01), 
+                 date_labels = "%b %Y") + 
+  theme_light()
+
+```
+
+There is clearing some seasonality on the total unit sold  versus time for adjustment
+
+
+The second plot is to examine relationship between the total unit sold versus the total advertising spend. 
+
+```{r}
+ggplot(market_sale_final, aes(x = Ad_Spend, y = Sales)) +
+  geom_point()
+```
+
+There is a weak positive correlation between Advertising Spend and total unit sold, with the pearson correlation of `r with(market_sale_final, cor(Ad_Spend, Sales)) |> scales::percent(accuracy = 0.1)`.
+
+
+
+```{r}
+ggplot(market_sale_final, aes(x = Date)) +
+  geom_line(aes(y = Sales), linewidth = 1.5, color = "red", alpha = 0.8) + 
+  geom_line(aes(y = Ad_Spend/100), color = "blue", alpha = 0.8) + 
+  scale_y_continuous(
+    name = "The units sold",
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*100, name="Total Advertising Spend ($)")
+  ) +
+  scale_x_date(date_breaks = "6 month", expand = c(0.01, 0.01), 
+                 date_labels = "%b %Y") + 
+  theme_light() +
+  theme(
+    axis.title.y = element_text(color = "red", size=13),
+    axis.title.y.right = element_text(color = "blue", size=13)
+  )
+```
+
+
+```{r}
+hist(market_sale_final$Sales)
+```
+
+
+The overall number of Sales is looking reasonably normal, thus there is no need to apply any additional normalization methods.
+
+
+
+### Descriptive summary 
+
+
+Total units sold versus years. 
+
+```{r, message=FALSE}
+market_sale_final %>%
+  group_by(Year) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales)) %>% 
+  knitr::kable()
+```
+
+The total units sold appears to decline from year to year. 
+
+
+Total units sold versus months
+```{r, message=FALSE}
+
+market_sale_final %>%
+  group_by(Month) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+```
+
+The most of total units sold appears to be at the later months of the year. 
+
+Total units sold versus days of the week. 
+```{r, message=FALSE}
+market_sale_final %>%
+  group_by(Day) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+```
+
+The total units sold appears to very similar between the days of each week. 
+
+
+```{r, message=FALSE}
+market_sale_final %>%
+  group_by(Ultra_Edition) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+
+market_sale_final %>%
+  group_by(Year, Ultra_Edition) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+```
+
+```{r}
+
+market_sale_final %>%
+  group_by(Positive_News) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+
+market_sale_final %>%
+  group_by(Negative_News) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales)) %>% 
+  knitr::kable()
+
+market_sale_final %>%
+  group_by(Positive_News, Negative_News) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+
+market_sale_final %>%
+  group_by(Competition)  %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+
+market_sale_final %>%
+  group_by(COVID_Lockdown) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+
+market_sale_final %>%
+  group_by(Phone_24) %>%
+  summarise(Sales_mean = mean(Sales),
+            Sales_sum = sum(Sales))%>% 
+  knitr::kable()
+```
+
+
+## Modelling using linear regression
+
+### Fitting the model
+
+```{r}
+linear_reg_fit <-
+  lm(
+    Sales ~ Ad_Spend + (Year * Month) / Day +
+      COVID_Lockdown + Ultra_Edition + Phone_24 + 
+      Positive_News + Negative_News + Competition,
+    data = market_sale_final
+  )
+```
+
+```{r}
+anova(linear_reg_fit) %>% knitr::kable() 
+```
+
+```{r}
+
+linear_reg_fit_final <- step(linear_reg_fit) 
+# Choose a model by AIC in a Stepwise Algorithm
+```
+
+```{r}
+
+anova(linear_reg_fit_final) %>% knitr::kable() 
+```
+
+```{r}
+summary(linear_reg_fit_final)  
+```
+
+### Model diagnostics
+
+```{r}
+hist(linear_reg_fit_final$residuals)
+
+plot(fitted(linear_reg_fit_final), resid(linear_reg_fit_final) )
+
+# calculate the mean squared error
+mse_linear <- 
+  sum(market_sale_final$Sales - 
+  predict.glm(linear_reg_fit_final,
+           newdata = market_sale_final, 
+           type = "response") ) ^2
+```
+
+## Modelling using Poisson regression
+
+Poisson regression is often used for modeling count data.
+
+
+### Fitting the model
+
+```{r}
+poisson_reg_fit <-
+  glm(
+    Sales ~ Ad_Spend + (Year * Month) / Day +
+      COVID_Lockdown + Ultra_Edition + Phone_24 + 
+      Positive_News + Negative_News + Competition,
+    data = market_sale_final,
+    family = poisson()
+)
+```
+
+```{r}
+car::Anova(poisson_reg_fit) %>% knitr::kable() 
+```
+
+```{r}
+poisson_reg_fit_final <- step(poisson_reg_fit)
+```
+
+```{r}
+car::Anova(poisson_reg_fit_final) %>% knitr::kable() 
+```
+
+### Model diagnostics
+
+```{r}
+hist(poisson_reg_fit$residuals)
+
+plot(fitted(poisson_reg_fit), resid(poisson_reg_fit) )
+
+# calculate the mean squared error
+mse_poisson <- 
+  sum(market_sale_final$Sales - 
+  predict.glm(poisson_reg_fit_final,
+           newdata = market_sale_final, 
+           type = "response") ) ^2
+```
+
+The AIC (`r AIC(poisson_reg_fit_final)`) and mean square error (`r mse_poisson`) from the Poisson regression model are slightly worse than the estimates from the linear regression above. 
+
+
+
+## Final results
+
+```{r}
+linear_reg_predict <- 
+  predict.lm(linear_reg_fit_final,
+           newdata = dec_ad_final, 
+           type = "response",
+           se.fit = TRUE) 
+
+dec_ad_final$Sales <- round(linear_reg_predict$fit)
+
+
+dec_ad_final %>% 
+  select(Date, Sales) %>% 
+  knitr::kable()
+```
+
+The linear regression model predicts the total unit sales in December 2020 is **`r sum(dec_ad_final$Sales)` with 95% confidence intervals of `r with(linear_reg_predict, fit - 1.96*se.fit) |> sum() |> round()` and `r with(linear_reg_predict, fit + 1.96*se.fit) |> sum() |> round()`**. Thus, the model suggests that the target sale of 3900 units in December 2020 is unlikely to meet.  
+
+
+The plot below is an interactive plot that contains both the historical (green colour-coded) and forecast (red colour-coded) sales with 95% confidence intervals. The user can hover the mouse cursor over the plot to see the actual estimates. 
+
+```{r, fig.width = 12}
+market_sale_final$Type <- "Historical"
+dec_ad_final$Type <- "Forecast"
+
+
+dec_ad_final$Sales_max <- with(linear_reg_predict, fit + 1.96*se.fit) |> round()
+dec_ad_final$Sales_min <- with(linear_reg_predict, fit - 1.96*se.fit) |> round()
+
+market_sale_final$Sales_max <- 
+  market_sale_final$Sales_min <- 
+  market_sale_final$Sales
+
+g <- 
+  market_sale_final %>% 
+  bind_rows(dec_ad_final) %>% 
+  mutate(Type = factor(Type)) %>% 
+  ggplot(aes(x = Date, y = Sales, col = Type, group = Type)) +
+  geom_path() +
+  geom_ribbon(aes(ymin = Sales_min, ymax = Sales_max, fill = Type), alpha = 0.2) +
+  scale_x_date(date_breaks = "6 month", expand = c(0.01, 0.01), 
+                 date_labels = "%b %Y") + 
+  theme_light()
+
+
+plotly::ggplotly(g)  %>% plotly::hide_legend()
+```
+
+
+
+
+## Notes
+
+
+
+In conclusion, multiple linear regression appears to perform the best here 
+
+The model explains 94.51% of the variation in the total unit sold and hsould therefore be an accurate model for prediction. 
+
+
+An **alternative method is using a time-series-based analysis** with the `forecast` R package, which can better handle autocorrelation, seasonality, and other temporal patterns in the data. However, applying the method within the `forecast` R package requires the dataset to be converted to a Time-Series (`ts`) object. This process can be complicated, especially if we need to include other predictors such as "Total Advertising Spend" in the model for inference and prediction.
+
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
+

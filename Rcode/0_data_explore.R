@@ -70,7 +70,7 @@ dim(market_sale_final)
 glimpse(market_sale_final)
 
 dec_ad_final <-
-  dec_ad_dat %>%
+  dec_ad_raw %>%
   mutate(
     Date_raw = dmy(Date),
     Ad_Spend =  AdvertisingSpend,
@@ -90,7 +90,7 @@ dec_ad_final <-
     Day_num = as.numeric(Day),
     Date_num = date(Date_raw)
   ) %>% 
-  select(Ad_Spend,Ad_Spend, Date_raw, Phone_24, Positive_News, Negative_News, 
+  select(Ad_Spend, Date_raw, Phone_24, Positive_News, Negative_News, 
          Competition, Ultra_Edition, 
          COVID_Lockdown, Year, Month, Day, Day_num, Date_num, Month_num, Year_num)
 
@@ -216,8 +216,9 @@ market_sale_final %>%
 
 linear_reg_fit <-
   lm(
-    Sales ~ Ad_Spend + COVID_Lockdown + Ultra_Edition + Phone_24 + 
-      Positive_News + Negative_News + Competition + (Year * Month) / Day,
+    Sales ~ Ad_Spend + (Year * Month) / Day +
+      COVID_Lockdown + Ultra_Edition + Phone_24 + 
+      Positive_News + Negative_News + Competition,
     data = market_sale_final
   )
 
@@ -292,15 +293,6 @@ mse_poisson <-
   predict.glm(poisson_reg_fit_final,
            newdata = market_sale_final, 
            type = "response") ) ^2
-
-# calculate the mean squared error of the predictions
-mse <- mean((test$mpg - predictions)^2)
-
-
-linear_reg_predict
-predict.glm(poisson_reg_fit_final,
-           newdata = dec_ad_final, 
-           type = "response") 
 
 
 
