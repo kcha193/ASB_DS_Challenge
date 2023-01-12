@@ -347,5 +347,5 @@ g <-
   theme_light()
 
 
-plotly::ggplotly(g)  %>% plotly::hide_legend()
+plotly::ggplotly(g) %>% plotly::hide_legend()
 
