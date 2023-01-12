@@ -9,7 +9,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
 ```
 
 ## Introduction 
@@ -19,7 +19,7 @@ The document contains a detailed analysis of forecast sale expectations of High-
 The report describes data cleaning, summary statistics, visualisation and analysis using the statistical model fitting, implemented with R programming language.
 
 
-## Loading and installing the required R package 
+## Loading and installing the required R packages 
 
 ```{r load_pkg, message=FALSE}
 if (!require(tidyverse))
@@ -40,7 +40,6 @@ if (!require(xgboost))
 library(tidyverse)
 library(lubridate)
 library(stargazer)
-library(car)
 library(xgboost)
 ```
 
@@ -80,9 +79,7 @@ glimpse(dec_ad_raw)
 
 ## Tidy up the variables of both datasets
 
-The next step is to tidy up the data sets for visualisation and modelling. I have also included year, month and day variables in both `factor` and `numeric` formats. 
-
-
+The next step is to tidy up the data sets for visualisation and modelling. I have included year, month and day variables in both `factor` and `numeric` formats. 
 
 ```{r tidy_market_sale}
 market_sale_final <- 
@@ -113,6 +110,7 @@ dim(market_sale_final)
 glimpse(market_sale_final)
 ```
 
+The following dataset is used to predict the total units sold in December 2020. Thus, this dataset contains the advertising spent without the expectation of competition or news stories. However, the Ultra Vac will continue to be sold. 
 
 ```{r tidy_dec_ad}
 dec_ad_final <-
@@ -149,11 +147,11 @@ glimpse(dec_ad_final)
 
 ### Data visulisation
 
-I will first generate some plots to look for any relationship. 
+The first step is to generate some plots to look for any relationships and outliers. 
 
-The first plot is total unit sold  versus time. 
+The first plot is a line plot on total unit sold versus time. 
 
-```{r}
+```{r, fig.width=12}
 ggplot(market_sale_final, aes(x = Date, y = Sales)) +
   geom_path() +
   scale_x_date(date_breaks = "6 month", expand = c(0.01, 0.01), 
@@ -162,21 +160,31 @@ ggplot(market_sale_final, aes(x = Date, y = Sales)) +
 
 ```
 
-There is clearing some seasonality on the total unit sold  versus time for adjustment
+There is clearing some seasonality on the total unit sold versus time for adjustment, thus, Year and Month variables might be important variables for the modelling fitting. 
 
 
-The second plot is to examine relationship between the total unit sold versus the total advertising spend. 
+The second plot examines the relationship between the total unit sold versus the total advertising spend. 
 
-```{r}
+```{r, fig.width=12}
 ggplot(market_sale_final, aes(x = Ad_Spend, y = Sales)) +
   geom_point()
 ```
 
-There is a weak positive correlation between Advertising Spend and total unit sold, with the pearson correlation of `r with(market_sale_final, cor(Ad_Spend, Sales)) |> scales::percent(accuracy = 0.1)`.
+There is a **weak positive correlation between the Advertising Spend and total unit sold, with the Pearson correlation of `r with(market_sale_final, cor(Ad_Spend, Sales)) |> scales::percent(accuracy = 0.1)`.**
+
+The plot is to see if the Advertising Spend logarithm transform can improve the linear relationship to the total unit sold. 
+
+```{r, fig.width=12}
+ggplot(market_sale_final, aes(x = log(Ad_Spend +1), y = Sales)) +
+  geom_point()
+```
+
+The correlation between the Advertising Spend and total unit sold is still weak, with the Pearson correlation becomes worse of `r with(market_sale_final, cor(log(Ad_Spend +1), Sales)) |> scales::percent(accuracy = 0.1)`. Thus, I will not logarithm transform the total Advertising Spend values.
 
 
+The following plot below is a line plot on total sold units and advertising spend across time.
 
-```{r}
+```{r, fig.width=12}
 ggplot(market_sale_final, aes(x = Date)) +
   geom_line(aes(y = Sales), linewidth = 1.5, color = "red", alpha = 0.8) + 
   geom_line(aes(y = Ad_Spend/100), color = "blue", alpha = 0.8) + 
@@ -194,18 +202,21 @@ ggplot(market_sale_final, aes(x = Date)) +
   )
 ```
 
+Again, there is some weak relationship between the total sold units and advertising spend across time, but modelling will require further confirm its relationship. 
+
+The following plot is to examine the distribution of the total units sold, to look for any possible skewness, which might require other data transformation. 
+
 
 ```{r}
 hist(market_sale_final$Sales)
 ```
 
-
-The overall number of Sales is looking reasonably normal, thus there is no need to apply any additional normalization methods.
-
+The total number of Sales is looking reasonably normal, i.e. bell-shaped; thus there is no need to apply any additional normalisation methods.
 
 
 ### Descriptive summary 
 
+The following set of tables contains some summary statistics to allow me to have some initial inspection on the total units sold against of the variables of the datasets. 
 
 Total units sold versus years. 
 
@@ -232,7 +243,7 @@ market_sale_final %>%
 
 The most of total units sold appears to be at the later months of the year. 
 
-Total units sold versus days of the week. 
+Total units sold versus days of the week
 ```{r, message=FALSE}
 market_sale_final %>%
   group_by(Day) %>%
@@ -244,28 +255,32 @@ market_sale_final %>%
 The total units sold appears to very similar between the days of each week. 
 
 
+Total units sold versus having the Ultra Edition.
+
 ```{r, message=FALSE}
 market_sale_final %>%
   group_by(Ultra_Edition) %>%
   summarise(Sales_mean = mean(Sales),
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
-
-market_sale_final %>%
-  group_by(Year, Ultra_Edition) %>%
-  summarise(Sales_mean = mean(Sales),
-            Sales_sum = sum(Sales))%>% 
-  knitr::kable()
 ```
+
+The total units sold appears to be similar with or without the Ultra Edition. 
+
+
+Total units sold versus having the Positive news.
 
 ```{r}
 
 market_sale_final %>%
   group_by(Positive_News) %>%
   summarise(Sales_mean = mean(Sales),
-            Sales_sum = sum(Sales))%>% 
+            Sales_sum = sum(Sales)) %>% 
   knitr::kable()
 ```
+The total units sold is higher with the Positive news. 
+
+Total units sold versus having the Negative news.
 
 ```{r}
 market_sale_final %>%
@@ -274,15 +289,10 @@ market_sale_final %>%
             Sales_sum = sum(Sales)) %>% 
   knitr::kable()
 ```
+The total units sold is higher without the Negative news. 
 
-```{r}
-market_sale_final %>%
-  group_by(Positive_News, Negative_News) %>%
-  summarise(Sales_mean = mean(Sales),
-            Sales_sum = sum(Sales))%>% 
-  knitr::kable()
-```
 
+Total units sold versus having the Competition
 ```{r}
 market_sale_final %>%
   group_by(Competition)  %>%
@@ -290,7 +300,10 @@ market_sale_final %>%
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
 ```
+The total units sold appears to be similar with or without the Competition. 
 
+
+Total units sold versus having the COVID Lockdown
 ```{r}
 market_sale_final %>%
   group_by(COVID_Lockdown) %>%
@@ -298,7 +311,11 @@ market_sale_final %>%
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
 ```
+The total units sold is significant higher without the COVID Lockdown. 
 
+
+
+Total units sold versus having the 24/7 call line. 
 ```{r}
 market_sale_final %>%
   group_by(Phone_24) %>%
@@ -306,20 +323,21 @@ market_sale_final %>%
             Sales_sum = sum(Sales))%>% 
   knitr::kable()
 ```
+The total units sold appears to be higher when there is 24/7 call line available. 
 
 
 ## Modelling using linear regression
 
-Since the distribution of the total units sold is relatively normal with a belt-shaped curve, I will start by fitting a multiple linear regression model for the total units sold, as seen below. Using a multiple linear regression model is a good starting point, because it is relatively straightforward to fit the model and perform model diagnostics to decide whether a more complicated modelling technique is required. Further, linear regression analysis makes inference easy, i.e. interpreting which predictor variable has statistically significant effects or has the most influence on the target variable. Lastly,  linear regression analysis can be used to make predictions about the value of the target variable based on the values of the predictor variables.
+Since the distribution of the total units sold is relatively normal with a belt-shaped curve, I will start by fitting a multiple linear regression model for the total units sold, as seen below. Using a multiple linear regression model is a good starting point, because it is relatively straightforward to fit the model and perform model diagnostics to decide whether a more complicated modelling technique is required. Further, linear regression analysis makes inference easy, i.e. interpreting which predictor variable has statistically significant effects or has the most influence on the target variable. Lastly, linear regression analysis can be used to make predictions about the value of the target variable based on the values of the predictor variables.
 
 ### Fitting the model
 
 ```{r}
 linear_reg_fit <-
   lm(
-    Sales ~ Ad_Spend + (Year * Month) / Day +
-      COVID_Lockdown + Ultra_Edition + Phone_24 + 
-      Positive_News + Negative_News + Competition,
+    Sales ~ Ad_Spend + (Year_num * Month) / Day +
+      COVID_Lockdown + Ultra_Edition + Competition + Phone_24 + 
+      Positive_News + Negative_News,
     data = market_sale_final
   )
 ```
@@ -344,16 +362,7 @@ ANOVA table of the final model
 anova(linear_reg_fit_final) 
 ```
 
-Parameter estimates
-
-```{r}
-summary(linear_reg_fit_final)  
-
-sum_stats <- summary(linear_reg_fit_final)
-```
-
-Note that this multiple linear regression model has an adjusted R-square of `r sum_stats$adj.r.squared`, which means this model can explain **`r scales::percent(sum_stats$adj.r.squared, accuracy = 0.01)`** of the information, thus a very accurate model. 
-
+ 
 
 ### Model diagnostics
 
@@ -370,29 +379,55 @@ mse_linear <-
            type = "response") ) ^2
 ```
 
-The AIC and mean square error from the Poisson regression model are `r AIC(linear_reg_fit_final)` and `r mse_linear`, respectively. This histogram of the residual is relatively normal, and the residual plot is randomly scattered around the residual of zero. 
+The AIC and mean square error from this multiple linear regression model are `r AIC(linear_reg_fit_final)` and `r mse_linear`, respectively. This histogram of the residual is relatively normal, and the residual plot is randomly scattered around the residual of zero. 
+
+### Parameter estimates
+
+```{r}
+summary(linear_reg_fit_final)  
+
+sum_stats <- summary(linear_reg_fit_final)
+```
+
+Note that this multiple linear regression model has an adjusted R-square of `r sum_stats$adj.r.squared`, which means this model can explain **`r scales::percent(sum_stats$adj.r.squared, accuracy = 0.01)`** of the information, thus a very accurate model. 
+
+There are some interesting insights has shown from this model: 
+
++ For every \$1000 spent on the advertising the total daily units sold is increased by `r round(sum_stats$coefficients["Ad_Spend",1] * 1000, 2)`,
++ For every one year increase, the average total daily units sold is increase by `r sum_stats$coefficients["Year_num",1] |> abs() |> round(2)`,
++ On the other hand, December is the best performing month in terms of total daily units sold, `r sum_stats$coefficients["MonthDecember",1] |> abs() |> round(2)` more compared to January. 
++ COVID Lockdown has been shown to reduce the total daily units sold by `r sum_stats$coefficients["COVID_Lockdown1",1] |> abs() |> round(2)`.
++ Positive coverage has been shown to increase the total daily units sold by `r sum_stats$coefficients["Positive_News1",1] |> abs() |> round(2)`,
++ Negative coverage has shown to reduce the total daily units sold by `r sum_stats$coefficients["Negative_News1",1] |> abs() |> round(2)`
++ Having the 24/7 call line increase the total daily units sold by `r sum_stats$coefficients["Phone_241",1] |> abs() |> round(2)`
++ Finally, the final multiple linear regression model suggests there are no statistically significant effects on the total units sold on: 
+
+    - with or without the ultra edition, 
+    - having competition and
+    - between the days of each week. 
+
 
 ## Modelling using Poisson regression
 
-Poisson regression is often used for modeling count data. Thus, below is the modelling results using the Poisson regression analysis. 
+Poisson regression is often used for modelling count data. Thus, below is the modelling results using the Poisson regression analysis. I used the identity link function here, as there is no need to perform any additional transformation on the target variable from the above inspection on the distribution. 
 
 ### Fitting the model
 
 ```{r}
 poisson_reg_fit <-
   glm(
-    Sales ~ Ad_Spend + (Year * Month) / Day +
-      COVID_Lockdown + Ultra_Edition + Phone_24 + 
-      Positive_News + Negative_News + Competition,
+   Sales ~ Ad_Spend + (Year_num * Month) / Day +
+      COVID_Lockdown + Ultra_Edition + Competition + Phone_24 + 
+      Positive_News + Negative_News,
     data = market_sale_final,
-    family = poisson()
+    family = poisson(link = "identity")
 )
 ```
 
 ANOVA table of the initial model
 
 ```{r}
-car::Anova(poisson_reg_fit) 
+car::Anova(poisson_reg_fit, type = 3) 
 ```
 
 
@@ -406,15 +441,15 @@ poisson_reg_fit_final <- step(poisson_reg_fit)
 ANOVA table of the final model
 
 ```{r}
-car::Anova(poisson_reg_fit_final)
+car::Anova(poisson_reg_fit_final, type = 3)
 ```
 
 ### Model diagnostics
 
 ```{r}
-hist(poisson_reg_fit$residuals)
+hist(poisson_reg_fit_final$residuals)
 
-plot(fitted(poisson_reg_fit), resid(poisson_reg_fit) )
+plot(fitted(poisson_reg_fit_final), resid(poisson_reg_fit_final) )
 
 # calculate the mean squared error
 mse_poisson <- 
@@ -424,102 +459,66 @@ mse_poisson <-
            type = "response") ) ^2
 ```
 
-The AIC (`r AIC(poisson_reg_fit_final)`) and mean square error (`r mse_poisson`) from the Poisson regression model are slightly worse than the estimates from the linear regression above (IC (`r AIC(linear_reg_fit_final)`) and mean square error (`r mse_linear`)). 
+The AIC (`r AIC(poisson_reg_fit_final)`) and mean square error (`r mse_poisson`) from the Poisson regression model are slightly better than the estimates from the linear regression above (AIC = `r AIC(linear_reg_fit_final)` and mean square error = `r mse_linear`). This histogram of the residual is also relatively normal, and the residual plot is randomly scattered around the residual of zero. Thus, we will use the Poisson regression for our final prediction.  
 
 
-## Modelling using eXtreme Gradient Boosting (XGBoost)
-
-Finally, I will also use the XGBoost model to see if we can obtain a model with an even smaller mean square error to ensure the total sales prediction is accurate and robust. When prepping the data for the model training below, I did not split the data into training and testing. This is because the two models above both compute the mean square error with the training data set only. Thus, I would not split the testing dataset to consistently compare the mean square errors between different models.  
-
-```{r, message=FALSE}
-market_sale_final_mat <- 
-  market_sale_final %>% 
-    select(Sales, Ad_Spend, Phone_24, Positive_News, Negative_News, Competition,
-           Ultra_Edition, COVID_Lockdown, Year_num, Month_num, Day_num) %>% 
-    mutate(Year_month = paste0(Year_num, Month_num)) %>%
-    as.matrix() 
-
-market_sale_final_mat <- 
-  apply(market_sale_final_mat, 2, as.numeric)
-
-train <- market_sale_final_mat
-
-# create DMatrix objects for training and test sets
-dtrain <- xgb.DMatrix(data = train[,-1],  label = train[, "Sales"])
-
-# specify the model parameters
-params <- list(booster = "gbtree", objective = "reg:squarederror", 
-               eta = 0.3, max_depth = 3,subsample = 0.8,
-               colsample_bytree = 0.8, nthread = 2)
-
-#tuning hyperparameter
-gridsearch_params <- list(max_depth = c(2,4,6),min_child_weight = c(1,3,5))
-cv_result <- 
-  xgb.cv(params = params, data = dtrain, nfold = 5, nrounds = 100,
-       num_boost_round = 100, early_stopping_rounds = 10, 
-       metrics = "mse", verbose = TRUE, 
-       seed = 1, 
-       maximize = FALSE, 
-       param_comb = gridsearch_params)
-
-# update the model parameters with the optimal values
-params$max_depth <- cv_result$best_param["max_depth"]
-params$min_child_weight <- cv_result$best_param["min_child_weight"]
-
-# train the final model using the optimal parameters and number of rounds
-xgboostModel <- xgb.train(params, dtrain, nrounds = 10)
-```
-
-
-Feature Importance of the model
+### Parameter Estimates
 
 ```{r}
-xgb.importance(colnames(train[,-1]), model = xgboostModel)
+summary(poisson_reg_fit_final)  
+
+sum_stats <- summary(poisson_reg_fit_final)
 ```
 
+There are some interesting insights has shown from this Poisson regression model: 
+
++ For every \$1000 spent on the advertising the total daily units sold is increased by `r round(sum_stats$coefficients["Ad_Spend",1] * 1000, 2)`,
++ For every one year increase, the average total daily units sold is increase by `r sum_stats$coefficients["Year_num",1] |> abs() |> round(2)`,
++ On the other hand, December is the best performing month in terms of total daily units sold, `r sum_stats$coefficients["MonthDecember",1] |> abs() |> round(2)` more compared to January. 
++ COVID Lockdown has been shown to reduce the total daily units sold by `r sum_stats$coefficients["COVID_Lockdown1",1] |> abs() |> round(2)`.
++ Positive coverage has been shown to increase the total daily units sold by `r sum_stats$coefficients["Positive_News1",1] |> abs() |> round(2)`,
++ Negative coverage has shown to reduce the total daily units sold by `r sum_stats$coefficients["Negative_News1",1] |> abs() |> round(2)`
++ Having the 24/7 call line increase the total daily units sold by `r sum_stats$coefficients["Phone_241",1] |> abs() |> round(2)`
++ Finally, the final multiple linear regression model suggests there are no statistically significant effects on the total units sold on: 
+
+    - with or without the ultra edition, 
+    - having competition and
+    - between the days of each week. 
+    
+
+## Final Prediction results for December of 2020 
+
+Exacting the final predicted sales for December of 2020 with the 95% confidence intervals using the final Poisson regression model. 
 
 ```{r}
-predictions <- predict(xgboostModel, dtrain)
-
-# calculate the mean squared error of the predictions
-mse_xgboost <- mean((train[, "Sales"] - predictions)^2)
-```
-
-The mean square error of this machine learning model using XGboost is `r `mse_xgboost`, which much higher than the linear regession model of `r mse_linear`. Therefore, I will use the multiple linear regression above for the making the final prediction. 
-
-
-## Final results
-
-As noted above, the multiple linear regression model has shown to perform the best compared to the Poisson regression model and 
-
-
-```{r}
-linear_reg_predict <- 
-  predict.lm(linear_reg_fit_final,
+poisson_reg_predict <- 
+  predict.glm(poisson_reg_fit_final,
            newdata = dec_ad_final, 
            type = "response",
            se.fit = TRUE) 
 
-dec_ad_final$Sales <- round(linear_reg_predict$fit)
+dec_ad_final$Sales <- round(poisson_reg_predict$fit)
 
+dec_ad_final$Sales_max <- with(poisson_reg_predict, fit + 1.96*se.fit) |> round()
+dec_ad_final$Sales_min <- with(poisson_reg_predict, fit - 1.96*se.fit) |> round()
+```
 
+Table of the daily total sales  for December of 2020.
+
+```{r}
 dec_ad_final %>% 
-  select(Date, Sales) %>% 
+  select(Date, Sales, Sales_min, Sales_max) %>% 
   knitr::kable()
 ```
 
-The linear regression model predicts the total unit sales in December 2020 is **`r sum(dec_ad_final$Sales)` with 95% confidence intervals of `r with(linear_reg_predict, fit - 1.96*se.fit) |> sum() |> round()` and `r with(linear_reg_predict, fit + 1.96*se.fit) |> sum() |> round()`**. Thus, the model suggests that the target sale of 3900 units in December 2020 is unlikely to meet.  
+The Poisson regression model predicts the total unit sales in December 2020 is **`r sum(dec_ad_final$Sales)` with 95% confidence intervals of `r with(poisson_reg_predict, fit - 1.96*se.fit) |> sum() |> round()` and `r with(poisson_reg_predict, fit + 1.96*se.fit) |> sum() |> round()`**. Thus, **the model suggests that the target sale of 3900 units in December 2020 is unlikely to meet**.  
 
 
-The plot below is an interactive plot that contains both the historical (green colour-coded) and forecast (red colour-coded) sales with 95% confidence intervals. The user can hover the mouse cursor over the plot to see the actual estimates. 
+The plot below is an interactive plot that contains both the historical (green colour-coded) and forecast (red colour-coded) sales with 95% confidence intervals. The user can hover the mouse cursor over the plot to see the actual estimates and highlight a session of the plot to zoom-in. 
 
 ```{r, fig.width = 12}
 market_sale_final$Type <- "Historical"
 dec_ad_final$Type <- "Forecast"
-
-
-dec_ad_final$Sales_max <- with(linear_reg_predict, fit + 1.96*se.fit) |> round()
-dec_ad_final$Sales_min <- with(linear_reg_predict, fit - 1.96*se.fit) |> round()
 
 market_sale_final$Sales_max <- 
   market_sale_final$Sales_min <- 
@@ -545,6 +544,7 @@ plotly::ggplotly(g)  %>% plotly::hide_legend()
 
 An **alternative method is using a time-series-based analysis** with the `forecast` R package, which can better handle autocorrelation, seasonality, and other temporal patterns in the data. However, applying the method within the `forecast` R package requires the dataset to be converted to a Time-Series (`ts`) object. This process can be complicated, especially if we need to include other predictors such as "Total Advertising Spend" in the model for inference and prediction.
 
+In addition, I have also attempted to use the eXtreme Gradient Boosting (XGBoost) model to see if I can obtain a model with an even smaller mean square error to ensure the total sales prediction is accurate and robust, as this method has become a popular method on constructing a predictive machine learning model. However, I have found that my linear regression model gave much better mean square error estimates for this particular dataset. Thus, I have not include it in the final report. Please find its implementation in the `1_modelling.R` file of the `Rcode` folder.
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
 
