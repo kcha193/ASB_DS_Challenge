@@ -1,6 +1,3 @@
-## ----setup, include=FALSE-----------------------------------------------------------------------------------------------------------------------------
-knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
-
 
 ## ----load_pkg, message=FALSE--------------------------------------------------------------------------------------------------------------------------
 if (!require(tidyverse))
@@ -12,16 +9,14 @@ if (!require(lubridate))
 if (!require(plotly))
   install.packages("plotly")
 
-if (!require(car))
-  install.packages("stargazer")
+if (!require(knitr))
+  install.packages("knitr")
 
-if (!require(xgboost))
-  install.packages("xgboost")
+if (!require(car))
+  install.packages("car")
 
 library(tidyverse)
 library(lubridate)
-library(stargazer)
-library(xgboost)
 
 
 ## ----read_in_market_data, message=FALSE---------------------------------------------------------------------------------------------------------------
@@ -344,6 +339,7 @@ g <-
   geom_ribbon(aes(ymin = Sales_min, ymax = Sales_max, fill = Type), alpha = 0.2) +
   scale_x_date(date_breaks = "6 month", expand = c(0.01, 0.01), 
                  date_labels = "%b %Y") + 
+  labs(title = "Total daily units sold across time", y = "Number of units sold") +
   theme_light()
 
 
